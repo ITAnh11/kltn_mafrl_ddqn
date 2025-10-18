@@ -9,9 +9,19 @@ from mafrl.mafrl_ddqn import MAFRL_DDQN
 
 # === Thông số mô phỏng ===
 num_steps = 500  # số time slot mô phỏng mỗi case (hoặc 1000 tuỳ máy)
-ue_list = [20, 40, 60, 80, 100, 120, 140, 160, 180]  # số UE giống paper
-# ue_list = [60, 80, 100, 120, 140, 160]  # số UE giống paper
-# ue_list = [20, 40, 60, 80, 100]  # số UE giống paper
+latency_list = [
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+]  # độ trễ từ 0.1s đến 1.0s
+
 
 SEED = 42
 type_ue = 100
@@ -26,11 +36,11 @@ mafrl_results = []
 mafrl_ddqn_results = []
 
 
-for num_ue in ue_list:  # số UAV cố định
-    print(f"Đang chạy với {num_ue} UE...")
+for max_latency in latency_list:  # số UAV cố định
+    print(f"Đang chạy với độ trễ {max_latency}s...")
 
     # Khởi tạo env với số UE cụ thể
-    env = UAVMECEnv(num_ues=num_ue)
+    env = UAVMECEnv(num_ues=100, max_latency=max_latency)
 
     greedy_power, random_power, local_power = [], [], []
 
@@ -65,25 +75,21 @@ for num_ue in ue_list:  # số UAV cố định
             env.reset()
 
     print("Bắt đầu MARL...")
-    marl = MARL(num_ues=num_ue, num_uavs=10, num_episodes=25000)
+    marl = MARL(num_ues=100, num_uavs=10, num_episodes=25000, max_latency=max_latency)
     marl.env.reset(seed=SEED)
     marl.load_model(f"marl/model/marl_model_ver_ue_{type_ue}.pth")
     average_energy_marl = marl.test(num_steps=num_steps)
 
     print("Bắt đầu MAFRL...")
-    mafrl = MAFRL(num_ues=num_ue, num_uavs=10, num_episodes=25000)
+    mafrl = MAFRL(num_ues=100, num_uavs=10, num_episodes=25000, max_latency=max_latency)
     mafrl.env.reset(seed=SEED)
-    mafrl.load_model(f"mafrl/model/mafrl_model_ver_ue_{type_ue}.pth")
+    mafrl.load_model(f"mafrl/model/mafrl_model_ver_ue_{type_ue}_v1.pth")
     average_energy_mafrl = mafrl.test(num_steps=num_steps)
 
-    # print("Bắt đầu MARL-DDQN...")
-    # marl_ddqn = MARL_DDQN(num_ues=num_ue, num_uavs=10, num_episodes=25000)
-    # marl_ddqn.env.reset(seed=SEED)
-    # marl_ddqn.load_model(f"marl/model/marl_ddqn_model_ver_ue_{type_ue}.pth")
-    # average_energy_marl_ddqn = marl_ddqn.test(num_steps=num_steps)
-
     print("Bắt đầu MAFRL-DDQN...")
-    mafrl_ddqn = MAFRL_DDQN(num_ues=num_ue, num_uavs=10, num_episodes=25000)
+    mafrl_ddqn = MAFRL_DDQN(
+        num_ues=100, num_uavs=10, num_episodes=25000, max_latency=max_latency
+    )
     mafrl_ddqn.env.reset(seed=SEED)
     mafrl_ddqn.load_model(f"mafrl/model/mafrl_ddqn_model_ver_ue_{type_ue}_v1.pth")
     average_energy_mafrl_ddqn = mafrl_ddqn.test(num_steps=num_steps)
@@ -98,17 +104,17 @@ for num_ue in ue_list:  # số UAV cố định
 
 # === Vẽ biểu đồ như Fig.3 ===
 plt.figure(figsize=(10, 6))
-plt.plot(ue_list, greedy_results, marker="^", label="Greedy Offload", linewidth=2)
-plt.plot(ue_list, random_results, marker="d", label="Random Execute", linewidth=2)
-plt.plot(ue_list, local_results, marker="s", label="Local Execute", linewidth=2)
-plt.plot(ue_list, marl_results, marker="o", label="MARL", linewidth=2)
-plt.plot(ue_list, mafrl_results, marker="x", label="MAFRL", linewidth=2)
-plt.plot(ue_list, mafrl_ddqn_results, marker="v", label="MAFRL-DDQN", linewidth=2)
+plt.plot(latency_list, greedy_results, marker="^", label="Greedy Offload", linewidth=2)
+plt.plot(latency_list, random_results, marker="d", label="Random Execute", linewidth=2)
+plt.plot(latency_list, local_results, marker="s", label="Local Execute", linewidth=2)
+plt.plot(latency_list, marl_results, marker="o", label="MARL", linewidth=2)
+plt.plot(latency_list, mafrl_results, marker="x", label="MAFRL", linewidth=2)
+plt.plot(latency_list, mafrl_ddqn_results, marker="v", label="MAFRL-DDQN", linewidth=2)
 
-plt.xlabel("Number of UEs", fontsize=13)
+plt.xlabel("Latency (s)", fontsize=13)
 plt.ylabel("Sum Energy Consumption (J)", fontsize=13)
-plt.title("Impact of Number of UEs on Sum Energy Consumption", fontsize=14)
+plt.title("Impact of Latency on Sum Energy Consumption", fontsize=14)
 plt.legend(fontsize=12)
 plt.grid(True)
 plt.tight_layout()
-plt.savefig("all_vs_num_ues.png")
+plt.savefig("all_vs_latency.png")

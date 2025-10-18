@@ -10,6 +10,7 @@ from uav_mec_env import UAVMECEnv
 from parameters import *
 from dqn import DQN, ReplayMemory, Transition
 import os
+import csv
 
 # Device setup
 device = torch.device(
@@ -165,11 +166,28 @@ class Server:
 
 
 class MAFRL:
-    def __init__(self, num_ues=100, num_uavs=10, num_episodes=1000):
+    def __init__(
+        self,
+        num_ues=100,
+        num_uavs=10,
+        num_episodes=1000,
+        max_latency=1.0,
+        fmax_uav=FMAX_UAV,
+        task_data_size_min=TASK_DATA_MIN,
+        task_data_size_max=TASK_DATA_MAX,
+        task_cpu_cycles_min=TASK_CPU_MIN,
+        task_cpu_cycles_max=TASK_CPU_MAX,
+    ):
         self.env = UAVMECEnv(
             num_ues=num_ues,
             num_uavs=num_uavs,
             episode_length=EPISODE_LENGTH,
+            max_latency=max_latency,
+            fmax_uav=fmax_uav,
+            task_data_size_min=task_data_size_min,
+            task_data_size_max=task_data_size_max,
+            task_cpu_cycles_min=task_cpu_cycles_min,
+            task_cpu_cycles_max=task_cpu_cycles_max,
         )
         self.num_ues = num_ues
         self.num_uavs = num_uavs
@@ -187,13 +205,14 @@ class MAFRL:
 
         self.aggregation_interval = 50
         self.target_update_interval = 1
+        self.episode_rewards = []
 
     def train_and_update(self, ue_agent):
         """Train the UE agent and update its target network."""
         ue_agent.optimize_model()
         ue_agent.soft_update_target()
 
-    def run(self):
+    def run(self, save_csv=False, save_csv_file=""):
         self.env.reset()
         for ue_agent in self.ue_agents:
             ue_agent.set_parameters(self.server.get_parameters())
@@ -219,6 +238,7 @@ class MAFRL:
             reward = torch.tensor(reward, device=device, dtype=torch.float32).unsqueeze(
                 0
             )
+            self.episode_rewards.append(reward.item())
             for ue_agent in self.ue_agents:
                 next_state = torch.tensor(
                     self.env.get_state_ue(ue_agent.ue_id),
@@ -247,6 +267,17 @@ class MAFRL:
                 self.server.federated_aggregate(self.ue_agents)
                 for ue_agent in self.ue_agents:
                     ue_agent.set_parameters(self.server.get_parameters())
+
+        # lưu reward ra CSV
+        if save_csv:
+            os.makedirs("results", exist_ok=True)
+            file_path = save_csv_file if save_csv_file else "results/MAFRL_reward.csv"
+            with open(file_path, mode="w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Episode", "Reward"])
+                for i, r in enumerate(self.episode_rewards):
+                    writer.writerow([i, r])
+            print(f"Reward log saved to {file_path}")
 
         # Final evaluation after training
         total_energy = 0

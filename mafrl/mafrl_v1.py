@@ -10,7 +10,6 @@ from uav_mec_env import UAVMECEnv
 from parameters import *
 from dqn import DQN, ReplayMemory, Transition
 import os
-import csv
 
 # Device setup
 device = torch.device(
@@ -60,8 +59,13 @@ class UE_Agent:
         if len(self.memory) < BATCH_SIZE:
             return
         transitions = self.memory.sample(BATCH_SIZE)
+        # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
+        # detailed explanation). This converts batch-array of Transitions
+        # to Transition of batch-arrays.
         batch = Transition(*zip(*transitions))
 
+        # Compute a mask of non-final states and concatenate the batch elements
+        # (a final state would've been the one after which simulation ended)
         non_final_mask = torch.tensor(
             tuple(map(lambda s: s is not None, batch.next_state)),
             device=device,
@@ -74,29 +78,32 @@ class UE_Agent:
         action_batch = torch.cat(batch.action)
         reward_batch = torch.cat(batch.reward)
 
-        # Q(s_t, a) theo policy_net
+        # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
+        # columns of actions taken. These are the actions which would've been taken
+        # for each batch state according to policy_net
         state_action_values = self.policy_net(state_batch).gather(1, action_batch)
 
-        # === DDQN target ===
+        # Compute V(s_{t+1}) for all next states.
+        # Expected values of actions for non_final_next_states are computed based
+        # on the "older" target_net; selecting their best reward with max(1).values
+        # This is merged based on the mask, such that we'll have either the expected
+        # state value or 0 in case the state was final.
         next_state_values = torch.zeros(BATCH_SIZE, device=device)
         with torch.no_grad():
-            # 1. Chọn action tốt nhất ở next_state theo policy_net
-            next_state_actions = self.policy_net(non_final_next_states).max(1).indices
-            # 2. Ước lượng Q-value của action đó bằng target_net
             next_state_values[non_final_mask] = (
-                self.target_net(non_final_next_states)
-                .gather(1, next_state_actions.unsqueeze(1))
-                .squeeze(1)
+                self.target_net(non_final_next_states).max(1).values
             )
-
-        # y = r + gamma * Q_target(s', a*)
+        # Compute the expected Q values
         expected_state_action_values = (next_state_values * GAMMA) + reward_batch
 
+        # Compute Huber loss
         criterion = nn.SmoothL1Loss()
         loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
 
+        # Optimize the model
         self.optimizer.zero_grad()
         loss.backward()
+        # In-place gradient clipping
         torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
         self.optimizer.step()
 
@@ -157,7 +164,7 @@ class Server:
         self.set_parameters(total_params)
 
 
-class MAFRL_DDQN:
+class MAFRL:
     def __init__(
         self,
         num_ues=100,
@@ -165,21 +172,13 @@ class MAFRL_DDQN:
         num_episodes=1000,
         max_latency=1.0,
         fmax_uav=FMAX_UAV,
-        task_data_size_min=TASK_DATA_MIN,
-        task_data_size_max=TASK_DATA_MAX,
-        task_cpu_cycles_min=TASK_CPU_MIN,
-        task_cpu_cycles_max=TASK_CPU_MAX,
     ):
         self.env = UAVMECEnv(
             num_ues=num_ues,
             num_uavs=num_uavs,
             episode_length=EPISODE_LENGTH,
             max_latency=max_latency,
-            fmax_uav=fmax_uav,
-            task_data_size_min=task_data_size_min,
-            task_data_size_max=task_data_size_max,
-            task_cpu_cycles_min=task_cpu_cycles_min,
-            task_cpu_cycles_max=task_cpu_cycles_max,
+            fmax_uav=FMAX_UAV,
         )
         self.num_ues = num_ues
         self.num_uavs = num_uavs
@@ -204,14 +203,13 @@ class MAFRL_DDQN:
         )
 
         self.num_rounds = 100  # Number of rounds for training
-        self.episode_rewards = []  # Store rewards for each episode
 
     def train_and_update(self, ue_agent):
         """Train the UE agent and update its target network."""
         ue_agent.optimize_model()
         ue_agent.soft_update_target()
 
-    def run(self, save_csv_file="", save_csv=True):
+    def run(self):
         self.env.reset()
         cur_episode = 0
         for round in range(self.num_rounds):
@@ -249,8 +247,6 @@ class MAFRL_DDQN:
                 reward = torch.tensor(
                     reward, device=device, dtype=torch.float32
                 ).unsqueeze(0)
-
-                self.episode_rewards.append(reward.item())
                 for ue_agent in self.ue_agents:
                     next_state = torch.tensor(
                         self.env.get_state_ue(ue_agent.ue_id),
@@ -281,19 +277,6 @@ class MAFRL_DDQN:
                         ue_agent.set_parameters(self.server.get_parameters())
 
                 cur_episode += 1
-
-        # lưu reward ra CSV
-        if save_csv:
-            os.makedirs("results", exist_ok=True)
-            file_path = (
-                save_csv_file if save_csv_file else "results/MAFRL_DDQN_reward.csv"
-            )
-            with open(file_path, mode="w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["Episode", "Reward"])
-                for i, r in enumerate(self.episode_rewards):
-                    writer.writerow([i, r])
-            print(f"Reward log saved to {file_path}")
 
         # Final evaluation after training
         total_energy = 0

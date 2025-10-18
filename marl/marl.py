@@ -11,6 +11,9 @@ from parameters import *
 from dqn import DQN, ReplayMemory, Transition
 import os
 
+
+import csv
+
 # Device setup
 device = torch.device(
     "cuda"
@@ -20,11 +23,28 @@ device = torch.device(
 
 
 class MARL:
-    def __init__(self, num_ues=100, num_uavs=10, num_episodes=1000):
+    def __init__(
+        self,
+        num_ues=100,
+        num_uavs=10,
+        num_episodes=1000,
+        max_latency=1.0,
+        fmax_uav=FMAX_UAV,
+        task_data_size_min=TASK_DATA_MIN,
+        task_data_size_max=TASK_DATA_MAX,
+        task_cpu_cycles_min=TASK_CPU_MIN,
+        task_cpu_cycles_max=TASK_CPU_MAX,
+    ):
         self.env = UAVMECEnv(
             num_ues=num_ues,
             num_uavs=num_uavs,
             episode_length=EPISODE_LENGTH,
+            max_latency=max_latency,
+            fmax_uav=fmax_uav,
+            task_data_size_min=task_data_size_min,
+            task_data_size_max=task_data_size_max,
+            task_cpu_cycles_min=task_cpu_cycles_min,
+            task_cpu_cycles_max=task_cpu_cycles_max,
         )
         self.num_ues = num_ues
         self.num_uavs = num_uavs
@@ -40,6 +60,8 @@ class MARL:
         self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=LR, amsgrad=True)
         self.memory = ReplayMemory(REPLAY_MEMORY_SIZE_M)
         self.steps_done = 0
+
+        self.episode_rewards = []
 
     def select_action(self, state, eval_mode=False):
         if eval_mode:
@@ -112,7 +134,7 @@ class MARL:
         torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
         self.optimizer.step()
 
-    def run(self, num_steps=1000):
+    def run(self, num_steps=1000, save_csv=False, save_csv_file=""):
         print("Training started...")
         self.env.reset()
         states = []
@@ -160,11 +182,25 @@ class MARL:
                     key
                 ] * TAU + self.target_net_state_dict[key] * (1 - TAU)
             self.target_net.load_state_dict(self.target_net_state_dict)
+
+            self.episode_rewards.append(reward.item())
+
             if episode % 100 == 0:
                 print(
                     f"Episode {episode}, Total Energy: {info['total_energy_consumption']:.3f} J"
                 )
         print("Training completed.")
+
+        # lưu reward ra CSV
+        if save_csv:
+            os.makedirs("results", exist_ok=True)
+            file_path = save_csv_file if save_csv_file else "results/MARL_reward.csv"
+            with open(file_path, mode="w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Episode", "Reward"])
+                for i, r in enumerate(self.episode_rewards):
+                    writer.writerow([i, r])
+            print(f"Reward log saved to {file_path}")
 
         print("Testing started...")
         total_energy = []

@@ -16,6 +16,10 @@ class UAVMECEnv(gym.Env):
         max_latency=1.0,
         episode_length=EPISODE_LENGTH,
         fmax_uav=FMAX_UAV,
+        task_data_size_min=TASK_DATA_MIN,
+        task_data_size_max=TASK_DATA_MAX,
+        task_cpu_cycles_min=TASK_CPU_MIN,
+        task_cpu_cycles_max=TASK_CPU_MAX,
     ):
         super().__init__()
 
@@ -25,7 +29,10 @@ class UAVMECEnv(gym.Env):
         self.episode_length = episode_length
         self.fmax_uav = fmax_uav
         self.t = 0
-        self.p_propulsion_uav = 177  # W
+        self.task_data_size_min = task_data_size_min
+        self.task_data_size_max = task_data_size_max
+        self.task_cpu_cycles_min = task_cpu_cycles_min
+        self.task_cpu_cycles_max = task_cpu_cycles_max
 
         self.ue_positions = np.zeros((num_ues, 2))
         self.uav_positions = np.zeros((num_uavs, 2))
@@ -68,10 +75,10 @@ class UAVMECEnv(gym.Env):
 
     def _generate_task(self):
         self.task_data_size = np.random.uniform(
-            TASK_DATA_MIN, TASK_DATA_MAX, size=self.num_ues
+            self.task_data_size_min, self.task_data_size_max, size=self.num_ues
         )
         self.task_cpu_cycles = np.random.uniform(
-            TASK_CPU_MIN, TASK_CPU_MAX, size=self.num_ues
+            self.task_cpu_cycles_min, self.task_cpu_cycles_max, size=self.num_ues
         )
 
     def _update_ue_positions(self):
