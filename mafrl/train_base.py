@@ -1,18 +1,18 @@
 import os
-from marl.marl import MARL
+from mafrl.mafrl_base import MAFRL
 from datetime import datetime
 
-num_ue = 100  # số UE cố định để train MARL
+num_ue = 20  # số UE cố định để train MARL
 
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-outdir = f"results/results_train_marl_ue_{num_ue}_{timestamp}"
+outdir = f"results/results_train_mafrl_new_ue_{num_ue}_{timestamp}"
 os.makedirs(outdir, exist_ok=True)
 
 
-marl = MARL(num_ues=num_ue, num_uavs=10, num_episodes=30000, outdir=outdir)
+mafrl = MAFRL(num_ues=num_ue, num_uavs=10, num_episodes=40000, outdir=outdir)
 time_start = datetime.now()
-marl.train()
-marl.save_model(f"marl/model/marl_model_ue_{num_ue}_{timestamp}.pth")
+mafrl.train()
+mafrl.save_model(f"mafrl/model/mafrl_model_new_ue_{num_ue}_{timestamp}.pth")
 time_end = datetime.now()
 print(f"Training started at: {time_start}")
 print(f"Training ended at: {time_end}")

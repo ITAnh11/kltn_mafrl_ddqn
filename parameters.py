@@ -6,6 +6,7 @@ NUM_UAVS_N = 10
 AREA_SIZE = 2000  # m
 TIME_SLOT_DURATION = 1.0  # s
 EPISODE_LENGTH = 100000  # số time slots
+
 # === UE mobility ===
 UE_SPEED_MIN = 0.0  # m/s
 UE_SPEED_MAX = 1.0  # m/s
@@ -69,7 +70,6 @@ LEARNING_RATE_ALPHA = 0.01
 REPLAY_MEMORY_SIZE_M = 5000
 EXPLORATION_INCREMENT_DELTA = 1e-4
 GAUSSIAN_NOISE_STD = 1e-3
-
 
 # BATCH_SIZE is the number of transitions sampled from the replay buffer
 # GAMMA is the discount factor as mentioned in the previous section

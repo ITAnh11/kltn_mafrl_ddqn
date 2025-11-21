@@ -99,14 +99,6 @@ class UAVMECEnv(gym.Env):
             ]
         )
 
-    def _get_obs(self):
-        offload_norm = self.offloading_decision / self.num_uavs
-        power_norm = self.transmission_power / MAX_TX_POWER_W
-        power_sys_norm = np.array([self.total_system_power / 1e2])
-        return np.concatenate([offload_norm, power_norm, power_sys_norm]).astype(
-            np.float32
-        )
-
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
@@ -123,7 +115,7 @@ class UAVMECEnv(gym.Env):
         self.offloading_decision.fill(0)
         self.transmission_power.fill(0.0)
         self.total_system_power = 0.0
-        return self._get_obs(), {}
+        return {}, {}
 
     def step(self, actions):
         self.t += 1
@@ -131,6 +123,9 @@ class UAVMECEnv(gym.Env):
         total_power_ue = 0.0
         total_power_uav = 0.0
         total_energy = 0.0
+
+        vio_local = 0
+        vio_offload = 0
 
         cpu_allocated = np.zeros(self.num_uavs)
         connected_ues = np.zeros(self.num_uavs)
@@ -145,6 +140,7 @@ class UAVMECEnv(gym.Env):
                 comp_power = KAPPA * self.ue_computation_capacity[i] ** NU
                 if exc_time > self.max_latency:
                     violations += 1
+                    vio_local += 1
                 total_power_ue += comp_power
                 total_energy += exc_time * comp_power
             else:
@@ -154,20 +150,19 @@ class UAVMECEnv(gym.Env):
                     self.ue_positions[i], self.uav_positions[uav_id], power, UAV_HEIGHT
                 )
                 tx_time = self.task_data_size[i] / rate
-                if tx_time > self.max_latency:
-                    violations += 1
 
                 cpu_req = self.task_cpu_cycles[i] / max(
                     (TIME_SLOT_DURATION - tx_time), 1e-6
                 )
                 exc_time = self.task_cpu_cycles[i] / cpu_req
-                comp_power = S_J * cpu_req**OMEGA_J
+
                 if tx_time + exc_time > self.max_latency:
                     violations += 1
+                    vio_offload += 1
 
                 total_power_ue += power
-                total_power_uav += comp_power
-                total_energy += tx_time * power + exc_time * comp_power
+
+                total_energy += tx_time * power
 
                 cpu_allocated[uav_id] += cpu_req
                 connected_ues[uav_id] += 1
@@ -178,11 +173,16 @@ class UAVMECEnv(gym.Env):
             )
 
         for uid in range(self.num_uavs):
-            if (
-                connected_ues[uid] > CMAX_UE_PER_UAV
-                or cpu_allocated[uid] > self.fmax_uav
-            ):
+            if connected_ues[uid] > CMAX_UE_PER_UAV:
                 violations += 1
+                vio_offload += 1
+
+            if cpu_allocated[uid] > self.fmax_uav:
+                violations += 1
+                vio_offload += 1
+
+            total_power_uav += S_J * cpu_allocated[uid] ** OMEGA_J
+            total_energy += S_J * cpu_allocated[uid] ** OMEGA_J * TIME_SLOT_DURATION
 
         reward = 1 / (
             ZETA * total_power_ue + ETA * total_power_uav + violations * REWARD_PENALTY
@@ -193,21 +193,21 @@ class UAVMECEnv(gym.Env):
         self._update_uav_positions()
 
         return (
-            self._get_obs(),
+            {},
             reward,
             self.t >= self.episode_length,
             False,
             {
-                "violations_count": violations,
+                "violations": violations,
                 "total_power_ue": total_power_ue,
                 "total_power_uav": total_power_uav,
-                "total_system_power": self.total_system_power,
+                "total_power_system": self.total_system_power,
                 "total_energy_consumption": total_energy,
+                "vio_local": vio_local,
+                "vio_offload": vio_offload,
+                "reward": reward,
             },
         )
-
-    def render(self):
-        pass
 
     def greedy_offloading(self):
         actions = []
@@ -221,14 +221,13 @@ class UAVMECEnv(gym.Env):
                     offload = uid + 1
                     ue_count[uid] += 1
                     break
-            power_idx = np.random.randint(NUM_TX_POWER_LEVELS)
+            power_idx = NUM_TX_POWER_LEVELS - 1  # max power
             action_id = offload * NUM_TX_POWER_LEVELS + power_idx
             actions.append(action_id)
         return np.array(actions)
 
     def random_offloading(self):
-        total_actions = (self.num_uavs + 1) * NUM_TX_POWER_LEVELS
-        return np.random.randint(0, total_actions, self.num_ues)
+        return np.random.randint(0, self.total_actions, self.num_ues)
 
     def local_execution(self):
         return np.zeros(

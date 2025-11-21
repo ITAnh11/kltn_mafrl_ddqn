@@ -11,6 +11,9 @@ from parameters import *
 from dqn import DQN, ReplayMemory, Transition
 import os
 
+from common import CSVLogger
+
+
 # Device setup
 device = torch.device(
     "cuda"
@@ -20,11 +23,29 @@ device = torch.device(
 
 
 class MARL_DDQN:
-    def __init__(self, num_ues=100, num_uavs=10, num_episodes=1000):
+    def __init__(
+        self,
+        num_ues=100,
+        num_uavs=10,
+        num_episodes=1000,
+        max_latency=1.0,
+        fmax_uav=FMAX_UAV,
+        task_data_size_min=TASK_DATA_MIN,
+        task_data_size_max=TASK_DATA_MAX,
+        task_cpu_cycles_min=TASK_CPU_MIN,
+        task_cpu_cycles_max=TASK_CPU_MAX,
+        outdir="",
+    ):
         self.env = UAVMECEnv(
             num_ues=num_ues,
             num_uavs=num_uavs,
             episode_length=EPISODE_LENGTH,
+            max_latency=max_latency,
+            fmax_uav=fmax_uav,
+            task_data_size_min=task_data_size_min,
+            task_data_size_max=task_data_size_max,
+            task_cpu_cycles_min=task_cpu_cycles_min,
+            task_cpu_cycles_max=task_cpu_cycles_max,
         )
         self.num_ues = num_ues
         self.num_uavs = num_uavs
@@ -40,6 +61,22 @@ class MARL_DDQN:
         self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=LR, amsgrad=True)
         self.memory = ReplayMemory(REPLAY_MEMORY_SIZE_M)
         self.steps_done = 0
+
+        self.episode_rewards = []
+        self.csv_logger = CSVLogger(
+            os.path.join(outdir, f"marl_training_log.csv"),
+            fieldnames=[
+                "episode",
+                "policy",
+                "reward",
+                "total_power_system",
+                "total_power_ue",
+                "total_power_uav",
+                "violations",
+                "vio_local",
+                "vio_offload",
+            ],
+        )
 
     def select_action(self, state, eval_mode=False):
         if eval_mode:
@@ -104,7 +141,7 @@ class MARL_DDQN:
         torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
         self.optimizer.step()
 
-    def run(self, num_steps=1000):
+    def train(self):
         print("Training started...")
         self.env.reset()
         states = []
@@ -132,12 +169,12 @@ class MARL_DDQN:
                 ).unsqueeze(0)
                 next_states.append(next_state)
 
-            reward = torch.tensor(reward, device=device, dtype=torch.float32).unsqueeze(
-                0
-            )
+            reward_tensor = torch.tensor(
+                reward, device=device, dtype=torch.float32
+            ).unsqueeze(0)
             for ue_id in range(self.env.num_ues):
                 self.memory.push(
-                    states[ue_id], actions[ue_id], next_states[ue_id], reward
+                    states[ue_id], actions[ue_id], next_states[ue_id], reward_tensor
                 )
             states = next_states
 
@@ -152,35 +189,26 @@ class MARL_DDQN:
                     key
                 ] * TAU + self.target_net_state_dict[key] * (1 - TAU)
             self.target_net.load_state_dict(self.target_net_state_dict)
+
+            self.csv_logger.log(
+                {
+                    "episode": episode,
+                    "policy": "MARL",
+                    "reward": round(reward, 6),
+                    "total_power_system": round(info["total_power_system"], 6),
+                    "total_power_ue": round(info["total_power_ue"], 6),
+                    "total_power_uav": round(info["total_power_uav"], 6),
+                    "violations": round(info["violations"], 6),
+                    "vio_local": round(info["vio_local"], 6),
+                    "vio_offload": round(info["vio_offload"], 6),
+                }
+            )
+
             if episode % 100 == 0:
                 print(
-                    f"Episode {episode}, Total Energy: {info['total_energy_consumption']:.3f} J"
+                    f"Episode {episode}, Total Power System: {info['total_power_system']}, Reward: {reward.item()}"
                 )
         print("Training completed.")
-
-        print("Testing started...")
-        total_energy = []
-        for step in range(num_steps):
-            actions = []
-            for ue_id in range(self.env.num_ues):
-                state = states[ue_id]
-                action = self.select_action(state, eval_mode=True)
-                actions.append(action)
-
-            _, reward, terminated, truncated, info = self.env.step(actions)
-
-            next_states = []
-            for ue_id in range(self.env.num_ues):
-                next_state = torch.tensor(
-                    self.env.get_state_ue(ue_id), device=device, dtype=torch.float32
-                ).unsqueeze(0)
-                next_states.append(next_state)
-
-            total_energy.append(info["total_energy_consumption"])
-
-            states = next_states
-        print(f"Average Energy Consumption: {np.mean(total_energy):.3f} J")
-        return np.mean(total_energy)
 
     def save_model(self, model_path):
         if not os.path.exists(os.path.dirname(model_path)):
@@ -197,8 +225,16 @@ class MARL_DDQN:
             print(f"Model file {model_path} does not exist.")
         self.policy_net.eval()
 
-    def test(self, num_steps=1000):
+    def test(self, num_steps=200):
         print("Testing started...")
+        avg_power_system = 0.0
+        avg_power_ue = 0.0
+        avg_power_uav = 0.0
+        avg_violations = 0.0
+        avg_vio_local = 0.0
+        avg_vio_offload = 0.0
+        avg_reward = 0.0
+
         states = []
         for ue_id in range(self.env.num_ues):
             state = torch.tensor(
@@ -206,7 +242,6 @@ class MARL_DDQN:
             ).unsqueeze(0)
             states.append(state)
 
-        total_energy = []
         for step in range(num_steps):
             actions = []
             for ue_id in range(self.env.num_ues):
@@ -223,10 +258,21 @@ class MARL_DDQN:
                 ).unsqueeze(0)
                 next_states.append(next_state)
 
-            total_energy.append(info["total_energy_consumption"])
-
             states = next_states
+            avg_power_system += info["total_power_system"]
+            avg_power_ue += info["total_power_ue"]
+            avg_power_uav += info["total_power_uav"]
+            avg_violations += info["violations"]
+            avg_vio_local += info["vio_local"]
+            avg_vio_offload += info["vio_offload"]
+            avg_reward += info["reward"]
 
-        average_energy = np.mean(total_energy)
-        print(f"Average Energy Consumption: {average_energy:.3f} J")
-        return average_energy
+        return {
+            "avg_power_system": avg_power_system / num_steps,
+            "avg_power_ue": avg_power_ue / num_steps,
+            "avg_power_uav": avg_power_uav / num_steps,
+            "avg_violations": avg_violations / num_steps,
+            "avg_vio_local": avg_vio_local / num_steps,
+            "avg_vio_offload": avg_vio_offload / num_steps,
+            "avg_reward": avg_reward / num_steps,
+        }
