@@ -7,11 +7,13 @@ import os
 # ⚙️ PHẦN CẤU HÌNH
 # ==============================================================================
 FILES_TO_COMPARE = {
-    "MAFRL": "results/results_train_mafrl_new_ue_20_20251121_014527/mafrl_new_training_log.csv",
-    "MAFRL (DDQN)": "results/results_train_mafrl_ddqn_ue_20_20251121_015449/mafrl_ddqn_training_log.csv",
+    "MAFRL": "results/results_train_mafrl_ue_100_20251120_021325/mafrl_training_log.csv",
+    "MAFRL (DDQN)": "results/results_train_mafrl_ddqn_ue_100_20251120_002322/mafrl_ddqn_training_log.csv",
+    # "MAFRL": "results/results_train_mafrl_ue_20_20251121_014527/mafrl_training_log.csv",
+    # "MAFRL (DDQN)": "results/results_train_mafrl_ddqn_ue_20_20251121_015449/mafrl_ddqn_training_log.csv",
 }
 
-WINDOW_SIZE = 100
+WINDOW_SIZE = 200
 # Thay vì 1 tên file, ta chỉ định thư mục lưu
 OUTPUT_DIR = "results/results_train/"
 
@@ -59,29 +61,49 @@ plt.rcParams.update({"font.size": 11})
 
 
 def save_single_plot(data, x_col, y_col, title, ylabel, window, filename):
-    """Hàm vẽ và lưu 1 biểu đồ duy nhất."""
+    """Hàm vẽ và lưu 1 biểu đồ duy nhất (MÀU TƯƠNG PHẢN + ĐƯỜNG ĐẬM)"""
 
-    # Tạo figure mới cho mỗi biểu đồ (Kích thước 10x6 cho đẹp)
     plt.figure(figsize=(10, 6))
 
-    # 1. Tính Moving Average
+    palette = {
+        "MAFRL": "#1f77b4",  # Xanh dương (màu gốc mặc định)
+        "MAFRL (DDQN)": "#ff7f0e",  # Cam (màu gốc mặc định)
+    }
+
+    # 1. Moving Average mượt hơn
     data[f"{y_col}_smooth"] = data.groupby("policy")[y_col].transform(
-        lambda x: x.rolling(window=window).mean()
+        lambda x: x.rolling(window=window, min_periods=1).mean()
     )
 
-    # 2. Vẽ đường mờ (Raw) - Không hiện legend để đỡ rối
+    # 2. Vẽ đường raw rất mờ (bóng nền)
     sns.lineplot(
-        data=data, x=x_col, y=y_col, hue="policy", alpha=0.15, legend=False, linewidth=1
+        data=data,
+        x=x_col,
+        y=y_col,
+        hue="policy",
+        palette=palette,
+        alpha=0.15,
+        linewidth=0.8,
+        legend=False,
     )
 
-    # 3. Vẽ đường đậm (Smooth) - Có legend
-    ax = sns.lineplot(
-        data=data, x=x_col, y=f"{y_col}_smooth", hue="policy", linewidth=2.5
+    # 3. Vẽ đường smooth chính (ĐẬM + RÕ MÀU)
+    sns.lineplot(
+        data=data,
+        x=x_col,
+        y=f"{y_col}_smooth",
+        hue="policy",
+        palette=palette,
+        linewidth=2.5,
     )
 
     plt.title(title, fontweight="bold")
     plt.ylabel(ylabel)
     plt.xlabel("Episode")
+
+    # ✅ GIỚI HẠN TRỤC X TỐI ĐA 30000 EPISODES
+    plt.xlim(0, 30000)
+
     plt.tight_layout()
 
     # Lưu file
@@ -89,7 +111,6 @@ def save_single_plot(data, x_col, y_col, title, ylabel, window, filename):
     plt.savefig(full_path, dpi=300)
     print(f"✅ Đã lưu ảnh: {full_path}")
 
-    # Đóng figure để giải phóng bộ nhớ (quan trọng khi chạy loop)
     plt.close()
 
 
