@@ -195,7 +195,7 @@ class MAFRL:
         self.num_episodes = num_episodes
 
         self.n_actions = self.env.total_actions
-        self.n_observations = 2 + num_uavs * 2 + 3
+        self.n_observations = self.env.state_size_ue
 
         self.ue_agents = [
             UE_Agent(ue_id, self.n_observations, self.n_actions)

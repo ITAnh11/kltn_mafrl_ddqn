@@ -52,7 +52,7 @@ class MARL:
         self.num_episodes = num_episodes
 
         self.n_actions = self.env.total_actions
-        self.n_observations = 2 + num_uavs * 2 + 3
+        self.n_observations = self.env.state_size_ue
 
         self.policy_net = DQN(self.n_observations, self.n_actions).to(device)
         self.target_net = DQN(self.n_observations, self.n_actions).to(device)
