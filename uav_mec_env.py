@@ -69,7 +69,6 @@ class UAVMECEnv(gym.Env):
             2  # UE position
             + 2 * self.num_uavs  # UAV positions
             + 3  # offloading decision, tx power, total system power
-            + 3  # f_ue, task_cpu_cycles, task_data_size
         )
 
     def _init_uav_positions(self):
@@ -248,14 +247,10 @@ class UAVMECEnv(gym.Env):
         ue_position_norm = self.ue_positions[ue_id] / AREA_SIZE
         uav_positions_norm = self.uav_positions / AREA_SIZE
         power_sys_norm = self.total_system_power / 1e2
-        f_ue_norm = self.ue_computation_capacity[ue_id] / FMAX_UE
-        task_cpu_norm = self.task_cpu_cycles[ue_id] / TASK_CPU_MAX
-        task_data_norm = self.task_data_size[ue_id] / TASK_DATA_MAX
         return np.concatenate(
             [
                 ue_position_norm,
                 uav_positions_norm.flatten(),
                 [offload_norm, power_norm, power_sys_norm],
-                [f_ue_norm, task_cpu_norm, task_data_norm],
             ]
         ).astype(np.float32)
